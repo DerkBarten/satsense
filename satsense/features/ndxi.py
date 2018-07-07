@@ -11,7 +11,7 @@ NDXI_OPTIONS = {
     'rb_ndvi': ('red', 'blue'),
     'ndsi': ('green', 'nir-1'),
     'ndwi': ('coastal', 'nir-2'),
-    'ndsi_nir2': ('green', 'nir-2')
+    'wvsi': ('green', 'yellow'),
 }
 
 
@@ -66,7 +66,7 @@ class NirNDVI(NDXI):
     """
     Calculates the red-green normalized difference vegetation index of the image
     """
-    def __init__(self, windows=((25, 25))):
+    def __init__(self, windows=[(25, 25)]):
         super(NirNDVI, self).__init__('nir_ndvi', windows=windows)
 
 class RgNDVI(NDXI):
@@ -80,17 +80,17 @@ class RbNDVI(NDXI):
     """
     Calculates the red-blue normalized difference vegetation index of the image
     """
-    def __init__(self, windows=(25, )):
+    def __init__(self, windows=[(25, 25)]):
         super(RbNDVI, self).__init__('rb_ndvi', windows=windows)
 
 class NDSI(NDXI):
-    def __init__(self, windows=(25, )):
+    def __init__(self, windows=[(25, 25)]):
         super(NDSI, self).__init__('ndsi', windows=windows)
 
 class NDWI(NDXI):
-    def __init__(self, windows=(25, )):
+    def __init__(self, windows=[(25, 25)]):
         super(NDWI, self).__init__('ndwi', windows=windows)
 
-class NBR(NDXI):
-    def __init__(self, windows=(25, )):
-        super(NBR, self).__init__('nbr', windows=windows)
+class WVSI(NDXI):
+    def __init__(self, windows=[(25, 25)]):
+        super(WVSI, self).__init__('wvsi', windows=windows)
