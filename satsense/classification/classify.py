@@ -21,129 +21,110 @@ config = configparser.ConfigParser()
 config.read("classify.ini")
 
 # Image settings
-image_base_path = config['Image']['base_path']
-train_images = config['Image']['train_images'].split(",")
-test_image = config['Image']['test_image']
-bands = eval(config['Image']['bands'])
+IMAGE_FOLDER = config['Image']['folder']
+BANDS = eval(config['Image']['bands'])
+TRAIN_IMAGES = [n.strip() for n in config['Image']['train_images'].split(",")]
+TEST_IMAGE = config['Image']['test_image'].strip()
 
 # Feature settings
-tile_size = eval(config['Features']['tile_size'])
-threshold = eval(config['Features']['threshold'])
-window_sizes = eval(config['Features']['window_sizes'])
-train_feature_vector_filenames = config['Features']['train_feature_vectors'].split(",")
-test_feature_vector_filename = config['Features']['test_feature_vector']
-feature_base_path = config['Features']['base_path']
-
-# Mask settings
-train_slum_mask_filenames = config['Masks']['train_slum_masks'].split(",")
-test_slum_mask_filename = config['Masks']['test_slum_mask']
-train_building_mask_filenames = config['Masks']['train_building_masks'].split(",")
-test_building_mask_filename = config['Masks']['test_building_mask']
-mask_base_path = config['Masks']['base_path']
+TILE_SIZE = eval(config['Features']['tile_size'])
+THRESHOLD = eval(config['Features']['threshold'])
+FEATURE_FOLDER = config['Features']['folder']
+MASK_FOLDER = config['Masks']['folder']
 
 LABELS = {
-    'NON-SLUM': 0,
-    'SLUM': 1
+    'BUILDING': 1,
+    'SLUM': 2,
+    'VEGETATION': 3
 }
 
-train_satellite_images = []
-for imagefile in train_images:
-    path = os.path.join(image_base_path, imagefile.strip())
-    print(path)
-    train_satellite_images.append(SatelliteImage.load_from_file(path, bands))
-
-test_satellite_image = SatelliteImage.load_from_file(os.path.join(
-                            image_base_path.strip(), test_image), bands)
-
-print("Creating train set...")
-X_train = None
-y_train = None
-for i, satellite_image in enumerate(train_satellite_images):
-    slum_mask_path = os.path.join(mask_base_path, train_slum_mask_filenames[i].strip())
-    building_mask_path = os.path.join(mask_base_path, train_building_mask_filenames[i].strip())
-    slum_mask = Mask.load_from_file(slum_mask_path)\
-                    .resample(tile_size, threshold)
-    building_mask = Mask.load_from_file(building_mask_path)\
-                        .resample(tile_size, threshold)
-    feature_vector = np.load(os.path.join(feature_base_path,
-                                          train_feature_vector_filenames[i].strip()))
-    # feature_vector = slum_mask[:, :, np.newaxis]
-
-    X_0, y_0 = Dataset(feature_vector).createXY(building_mask,
-                                                in_label=LABELS['NON-SLUM'])
-    X_1, y_1 = Dataset(feature_vector).createXY(slum_mask, remove_out=False,
-                                                in_label=LABELS['SLUM'],
-                                                out_label=LABELS['NON-SLUM'])
-
-    if X_train is None:
-        # X_train = np.concatenate((X_0, X_1), axis=0)
-        X_train = X_1
-    else:
-        # X_train  = np.concatenate((X_train, X_0, X_1), axis=0)
-        X_train  = np.concatenate((X_train, X_1), axis=0)
+def load_masks(image_name):
+    path = os.path.join(MASK_FOLDER, "vegetation", image_name + ".npy")
+    vegetation_mask = Mask.load_from_file(path)
+    path = os.path.join(MASK_FOLDER, "slum", image_name + ".npy")
+    slum_mask = Mask.load_from_file(path)
     
-    if y_train is None:
-        # y_train = np.concatenate((y_0, y_1), axis=0)
-        y_train = y_1
-    else:
-        # y_train = np.concatenate((y_train, y_0, y_1), axis=0)
-        y_train = np.concatenate((y_train, y_1), axis=0)
+    slum_mask = slum_mask.resample(TILE_SIZE, THRESHOLD)
+    vegetation_mask = vegetation_mask.resample(TILE_SIZE, THRESHOLD)
+
+    building_mask = (Mask(np.ones(slum_mask.shape)) - (Mask(vegetation_mask) | Mask(slum_mask))).mask
+
+    return slum_mask, vegetation_mask, building_mask
+
+def load_feature_vector(image_name):
+    return np.load(os.path.join(FEATURE_FOLDER, image_name + ".npy"))
 
 
-print("before SMOTE")
-print(X_train.shape)
-print(y_train.shape)
-print(np.unique(y_train, return_counts=True))
+def create_training_set():
+    X_train = None
+    y_train = None
+    for imagefile in TRAIN_IMAGES:
+        image_name = os.path.splitext(imagefile)[0]
 
-X_train, y_train = SMOTE().fit_sample(X_train, y_train)
-print("after SMOTE")
-print(X_train.shape)
-print(y_train.shape)
-print(np.unique(y_train, return_counts=True))
+        slum_mask, vegetation_mask, building_mask = load_masks(image_name)
+        feature_vector = load_feature_vector(image_name)
+        
+        X_0, y_0 = Dataset(feature_vector).createXY(building_mask,
+                                                    in_label=LABELS['BUILDING'])
+        X_1, y_1 = Dataset(feature_vector).createXY(slum_mask,
+                                                    in_label=LABELS['SLUM'])
+        X_2, y_2 = Dataset(feature_vector).createXY(vegetation_mask,
+                                                    in_label=LABELS['VEGETATION'])
+
+        if X_train is None:
+            X_train = np.concatenate((X_0, X_1, X_2), axis=0)
+        else:
+            X_train  = np.concatenate((X_train, X_0, X_1, X_2), axis=0)
+        
+        if y_train is None:
+            y_train = np.concatenate((y_0, y_1, y_2), axis=0)
+        else:
+            y_train = np.concatenate((y_train, y_0, y_1, y_2), axis=0)
+    
+    return X_train, y_train
+
+def create_test_set():
+    print(np.unique(y_train, return_counts=True))
+
+    image_name = os.path.splitext(TEST_IMAGE)[0]
+    slum_mask, vegetation_mask, building_mask = load_masks(image_name)
+    feature_vector = load_feature_vector(image_name)
+
+    y_test = np.zeros(feature_vector.shape[:2])
+    y_test[slum_mask == 1] =  LABELS['SLUM']
+    y_test[building_mask == 1] = LABELS['BUILDING']                                                       
+    y_test[vegetation_mask == 1] =  LABELS['VEGETATION']
+
+    nrows = feature_vector.shape[0] * feature_vector.shape[1]
+    nfeatures = feature_vector.shape[2]
+
+    X_test = np.reshape(feature_vector, (nrows, nfeatures))
+    y_test = np.reshape(y_test, (nrows, ))
+
+    return X_test, y_test
+
+if __name__ == "__main__":
+    print("Creating training set...")
+    X_train, y_train = create_training_set()
+    print("Creating test set...")
+    X_test, y_test = create_test_set()
+
+    classifier = GradientBoostingClassifier()
+    print("fitting...")
+
+    classifier.fit(X_train, y_train)
+    y_pred = classifier.predict(X_test)
+    # Label the vegetation as buildings to create more accurate representation of the performance
+    y_pred[y_pred == LABELS['VEGETATION']] = LABELS['BUILDING']
+    y_test[y_test == LABELS['VEGETATION']] = LABELS['BUILDING']
+
+    print(matthews_corrcoef(y_test, y_pred))
+    result_mask = Mask(np.reshape(y_pred, feature_vector.shape[:2]))
+    test_image = SatelliteImage.load_from_file(TEST_IMAGE, BANDS)
+    result_mask.overlay(test_image.rgb)
+    plt.show()
 
 
-
-print("Creating test set...")
-feature_vector = np.load(os.path.join(feature_base_path,
-                                      test_feature_vector_filename.strip()))
-slum_mask_path = os.path.join(mask_base_path, test_slum_mask_filename.strip())
-building_mask_path = os.path.join(mask_base_path, test_building_mask_filename.strip())
-slum_mask = Mask.load_from_file(slum_mask_path)\
-                 .resample(tile_size, threshold)
-building_mask = Mask.load_from_file(building_mask_path)\
-                 .resample(tile_size, threshold)
-
-# Mask(slum_mask).overlay(test_satellite_image.rgb)
-# plt.show()
-#feature_vector = slum_mask[:, :, np.newaxis]
-
-
-X_test, y_test = Dataset(feature_vector).createXY(slum_mask, remove_out=False,
-                                                  in_label=LABELS['SLUM'],
-                                                  out_label=LABELS['NON-SLUM'])
-
-print(X_test.shape)
-print(y_test.shape)
-
-classifier = GradientBoostingClassifier()
-print("fitting...")
-
-classifier.fit(X_train, y_train)
-y_pred = classifier.predict(X_test)
-
-print(matthews_corrcoef(y_test, y_pred))
-result_mask = Mask(np.reshape(y_pred, feature_vector.shape[:2]))
-result_mask.overlay(test_satellite_image.rgb)
-
-plt.show()
-
-
-# print(X_train.shape)
-# print(y_train.shape)
-# print(X_test.shape)
-# print(y_test.shape)
-# print(y_test)
-#y_pred = np.reshape(y_test, feature_vector.shape[:2])
 
 
 
