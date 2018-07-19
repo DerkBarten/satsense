@@ -15,9 +15,8 @@ def extract_features(features, generator):
         if hasattr(feature, 'initialize'):
             feature.initialize(generator.image)
 
-    for i, cell in enumerate(generator):
-        print("Processing cell {} of {} ...".format(i, len(generator)), end="\r")
+    for cell in generator:
         for name, feature in iteritems(features.items):
             feature_vector[cell.x, cell.y, feature.indices] = feature(cell)
-    print("")
+
     return feature_vector

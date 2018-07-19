@@ -7,6 +7,7 @@ from scipy.ndimage import zoom
 from satsense.bands import MASK_BANDS
 import matplotlib.pyplot as plt
 import rasterio
+from rasterio import mask
 import fiona
 #from bands import MASK_BANDS
 
@@ -14,7 +15,7 @@ from ..util import save_mask2file, load_mask_from_file
 
 class Mask():
     def __init__(self, mask):
-        self._mask = mask
+        self._mask = np.array(mask)
 
     @property
     def shape(self):
@@ -25,10 +26,14 @@ class Mask():
         return self._mask
     
     def save(self, path):
-        save_mask2file(self._mask, path)
+        np.save(path, self._mask)
+
+    def load_from_file_tif(path):
+        mask = load_mask_from_file(path)
+        return Mask(mask)
 
     def load_from_file(path):
-        mask = load_mask_from_file(path)
+        mask = np.load(path)
         return Mask(mask)
 
     def overlay(self, rgb_image):
@@ -36,6 +41,7 @@ class Mask():
         zoom_h = rgb_image.shape[0] / self.mask.shape[0]
         zoomed_mask = zoom(self.mask, (zoom_h, zoom_w), order=0)
 
+        plt.imshow(rgb_image)
         plt.imshow(zoomed_mask, cmap='hot', alpha=0.3)
 
     def __and__(self, other):
@@ -48,18 +54,31 @@ class Mask():
         return Mask(np.uint8(np.logical_not(self.mask)))
 
     def __sub__(self, other):
-        """ V & ~S
-            Removes everything from S that is present in V (in essence removes
-            slums that are included in vegetation)
+        """ A & ~B
+            Removes everything from A that is present in B. This is used to
+            remove slums from the vegetation mask.
         """
         m = np.logical_and(self.mask, np.logical_not(other.mask))
         return Mask(np.uint8(m))
+
+    def resample(self, size, threshold=0.8):
+        # Need 3d instead of 2d for cell generator
+        tmp = self.mask[:, :, np.newaxis]
+        mask_image = SatelliteImage(None, tmp, MASK_BANDS)
+        
+        generator = CellGenerator(mask_image, size)
+
+        resampled_mask = np.zeros(generator.shape)
+        for cell in generator:
+            if np.mean(cell.raw) > threshold:
+                    resampled_mask[cell.x, cell.y] = 1
+        return resampled_mask 
 
 class VegetationMask(Mask):   
     @staticmethod 
     def create(generator):
         mask = np.zeros(generator.shape)
-        ndvi = NirNDVI()
+        ndvi = NirNDVI(windows=((1, 1), ))
         for cell in generator:
             mask[cell.x, cell.y] = ndvi(cell)
         mask = np.uint8(mask < filters.threshold_otsu(mask))
@@ -70,7 +89,7 @@ class SoilMask(Mask):
     @staticmethod 
     def create(generator):
         mask = np.zeros(generator.shape)
-        wvsi = WVSI()
+        wvsi = WVSI(windows=((1, 1), ))
         for cell in generator:
             mask[cell.x, cell.y] = wvsi(cell)
         mask = np.uint8(mask > filters.threshold_otsu(mask))
@@ -83,24 +102,40 @@ class OnesMask(Mask):
         return OnesMask(mask)
 
 class ShapefileMask(Mask):
-    def create(shapefile, imagefile, size):
+    def create(shapefile, imagefile, size=(1,1)):
         with fiona.open(shapefile, "r") as sf:
             geoms = [feature["geometry"] for feature in sf]
 
         with rasterio.open(imagefile) as src:
-            out_image, _ = rasterio.mask.mask(src, geoms, crop=True,
-                                                        invert=False)
+            out_image, _ = rasterio.mask.mask(src, geoms, crop=False,
+                                              invert=False)
+            
+            # Set the 'no-data' value to 0 instead of 3.4e+38
             out_image[out_image == np.max(out_image)] = 0
+            # Set all values in the masked area to one as the masked area
+            # retains the original values 
             out_image[out_image > 0] = 1
+            # The same mask is created for every band, therefore the first
+            # band is selected 
             out_image = out_image[0]
-            out_image = np.reshape(out_image, (out_image.shape[0], out_image.shape[1], 1))
-            sat_im = SatelliteImage(None, out_image, MASK_BANDS)
-        
-            generator = CellGenerator(sat_im, size)
+            #out_image = np.transpose(out_image)
+           
+            
+        return ShapefileMask(np.uint8(out_image))
+            # The 2d mask must be converted to 3d to be able to be used in the
+            # Satellite image class
+            # out_image = out_image[:, :, np.newaxis]
+            # sat_im = SatelliteImage(None, out_image, MASK_BANDS)
 
-            mask = np.zeros(generator.shape)
-            for cell in generator:
-                mean = np.mean(cell.raw)
-                if mean > 0.1:
-                    mask[cell.x, cell.y] = 1
-        return ShapefileMask(np.uint8(mask))
+            
+            # generator = CellGenerator(sat_im, size)
+
+            # mask = np.zeros(generator.shape)
+            # area_cover_percentage_treshold = 0.4
+            # for i, cell in enumerate(generator):
+            #     mean = np.mean(cell.raw)
+            #     #print("{} of {}".format(i, len(generator)))
+            #     if mean > area_cover_percentage_treshold:
+            #         mask[cell.x, cell.y] = 1
+            
+        # return ShapefileMask(np.uint8(mask))

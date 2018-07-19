@@ -1,1 +1,1 @@
-from .mask import VegetationMask, SoilMask, ShapefileMask, OnesMask
+from .mask import Mask, VegetationMask, SoilMask, ShapefileMask, OnesMask
