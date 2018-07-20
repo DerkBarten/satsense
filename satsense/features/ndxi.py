@@ -1,5 +1,3 @@
-from abc import ABCMeta, abstractproperty
-
 import numpy as np
 
 from ..bands import WORLDVIEW3
@@ -13,7 +11,6 @@ NDXI_OPTIONS = {
     'ndwi': ('coastal', 'nir-2'),
     'wvsi': ('green', 'yellow'),
 }
-
 
 def ndxi(image, option, bands=WORLDVIEW3):
     band_0_name = NDXI_OPTIONS[option][0]
