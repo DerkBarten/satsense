@@ -7,7 +7,7 @@ from satsense.masks import Mask
 from satsense.classification import Dataset
 import os
 import numpy as np
-from imblearn.over_sampling import SMOTE
+from imblearn.over_sampling import SMOTE, RandomOverSampler
 
 import matplotlib.pyplot as plt
 
@@ -116,7 +116,14 @@ if __name__ == "__main__":
     print("Creating training set...")
     X_train, y_train = create_training_set()
     print("Oversampling")
-    X_train, y_train = SMOTE().fit_sample(X_train, y_train)
+    print(np.unique(y_train, return_counts=True))
+
+    ratio = {LABELS["BUILDING"]: np.count_nonzero(y_train == LABELS["BUILDING"]),
+             LABELS["VEGETATION"]:  np.count_nonzero(y_train == LABELS["VEGETATION"]),
+             LABELS["SLUM"]: np.count_nonzero(y_train == LABELS["BUILDING"]) + np.count_nonzero(y_train == LABELS["VEGETATION"])}
+             
+    print(ratio)
+    X_train, y_train = RandomOverSampler(ratio=ratio).fit_sample(X_train, y_train)
     print("Creating test set...")
     X_test, y_test, original_shape = create_test_set()
 

@@ -42,7 +42,6 @@ def print_ndxi_statistics(ndxi, option):
 
 
 class NDXI(Feature):
-    __metaclass__ = ABCMeta
 
     def __init__(self,  option, windows=((25, 25), )):
         super(NDXI, self)
